@@ -91,6 +91,7 @@ pub async fn serve(port: u16, database: &PathBuf, workers_count: u8) {
   let api_routes = Router::new()
     .route("/get", get(get_lyrics_by_metadata::route))
     .route("/get/:track_id", get(get_lyrics_by_track_id::route))
+    .route("/get/:isrc", get(get_lyrics_by_isrc::route))
     .route("/search", get(search_lyrics::route))
     .route("/request-challenge", post(request_challenge::route))
     .route("/publish", post(publish_lyrics::route))
