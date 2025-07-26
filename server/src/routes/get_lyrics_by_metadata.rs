@@ -148,7 +148,7 @@ fn create_response(track: SimpleTrack) -> TrackResponse {
     instrumental,
     plain_lyrics,
     synced_lyrics,
-    isrcs: track.isrcs,
+    isrcs: track.isrcs.to_owned(),
   }
 }
 

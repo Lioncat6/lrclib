@@ -138,7 +138,7 @@ fn create_response(tracks: Vec<SimpleTrack>) -> Vec<TrackResponse> {
         instrumental,
         plain_lyrics,
         synced_lyrics,
-        isrcs: track.isrcs
+        isrcs: track.isrcs.to_owned(),
       }
     }
   ).collect()
