@@ -17,6 +17,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 use routes::{
   get_lyrics_by_metadata,
   get_lyrics_by_track_id,
+  get_lyrics_by_isrc,
   search_lyrics,
   request_challenge,
   publish_lyrics,
