@@ -31,6 +31,7 @@ pub struct TrackResponse {
   instrumental: bool,
   plain_lyrics: Option<String>,
   synced_lyrics: Option<String>,
+  isrcs: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -132,6 +133,7 @@ fn create_response(tracks: Vec<SimpleTrack>) -> Vec<TrackResponse> {
         instrumental,
         plain_lyrics,
         synced_lyrics,
+        isrcs: track.isrcs
       }
     }
   ).collect()
