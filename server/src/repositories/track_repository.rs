@@ -76,46 +76,42 @@ pub fn get_track_by_isrc(isrc: String, conn: &mut Connection) -> Result<Option<S
     FROM
       tracks
       LEFT JOIN lyrics ON tracks.last_lyrics_id = lyrics.id
-  "};
+      JOIN json_each(tracks.isrcs) AS je
+    WHERE
+      je.value = ?
+    LIMIT 1
+    "};
     let mut statement = conn.prepare(query)?;
-    let mut rows = statement.query([])?;
-    while let Some(row) = rows.next()? {
-        let isrcs: Option<String> = row.get("isrcs")?;
-        let isrcs_vec: Option<Vec<String>> = isrcs
-            .as_ref()
-            .and_then(|s| serde_json::from_str(s).ok());
+    let row = statement
+        .query_row([isrc], |row| {
+            let instrumental = match row.get("instrumental")? {
+                Some(value) => value,
+                None => false,
+            };
 
-        // Check if the provided ISRC exists in the isrcs array
-        if let Some(ref vec) = isrcs_vec {
-            if !vec.iter().any(|i| i == &isrc) {
-                continue;
-            }
-        } else {
-            continue;
-        }
+            let last_lyrics = SimpleLyrics {
+                plain_lyrics: row.get("plain_lyrics")?,
+                synced_lyrics: row.get("synced_lyrics")?,
+                instrumental,
+            };
 
-        let instrumental = match row.get("instrumental")? {
-            Some(value) => value,
-            None => false,
-        };
+            let isrcs: Option<String> = row.get("isrcs")?;
+            let isrcs_vec = isrcs
+                .as_ref()
+                .and_then(|s| serde_json::from_str(s).ok());
 
-        let last_lyrics = SimpleLyrics {
-            plain_lyrics: row.get("plain_lyrics")?,
-            synced_lyrics: row.get("synced_lyrics")?,
-            instrumental,
-        };
-
-        return Ok(Some(SimpleTrack {
-            id: row.get("id")?,
-            name: row.get("name")?,
-            artist_name: row.get("artist_name")?,
-            album_name: row.get("album_name")?,
-            duration: row.get("duration")?,
-            last_lyrics: Some(last_lyrics),
-            isrcs: isrcs_vec,
-        }));
-    }
-    Ok(None)
+            Ok(SimpleTrack {
+                id: row.get("id")?,
+                name: row.get("name")?,
+                artist_name: row.get("artist_name")?,
+                album_name: row.get("album_name")?,
+                duration: row.get("duration")?,
+                last_lyrics: Some(last_lyrics),
+                isrcs: isrcs_vec,
+            })
+        })
+        .optional()?;
+    Ok(row)
 }
 
 pub fn get_track_id_by_metadata(
