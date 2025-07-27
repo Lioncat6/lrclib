@@ -1,6 +1,6 @@
 use axum::{extract::State, http::{HeaderMap, StatusCode}, Json};
 use serde::{Deserialize, Serialize};
-use crate::{errors::ApiError, repositories::track_repository::submit_isrcs, AppState, utils::is_valid_publish_token};
+use crate::{errors::ApiError, repositories::track_repository::submit_isrcs, AppState};
 use std::sync::Arc;
 
 #[derive(Serialize)]
@@ -25,25 +25,13 @@ pub struct SubmitISRCSRequest {
 }
 
 pub async fn route(
-  headers: HeaderMap,
   State(state): State<Arc<AppState>>,
   Json(payload): Json<SubmitISRCSRequest>,
 ) -> Result<StatusCode, ApiError> {
-  match headers.get("X-Publish-Token") {
-    Some(publish_token) => {
-      let is_valid = is_valid_publish_token(publish_token.to_str()?, &state.challenge_cache).await;
+  let isrcs = payload.isrcs.as_deref().unwrap_or(&[]);
+  let track_id = payload.track_id;
+  let mut conn = state.pool.get()?;
+  submit_isrcs(isrcs, track_id, &mut conn)?;
 
-      if is_valid {
-        let isrcs = payload.isrcs.as_deref().unwrap_or(&[]);
-        let track_id = payload.track_id;
-        let mut conn = state.pool.get()?;
-        submit_isrcs(isrcs, track_id, &mut conn)?;
-
-        Ok(StatusCode::CREATED)
-      } else {
-        Err(ApiError::IncorrectPublishTokenError)
-      }
-    },
-    None => Err(ApiError::IncorrectPublishTokenError)
-  }
+  Ok(StatusCode::CREATED)
 }
