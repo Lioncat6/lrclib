@@ -8,32 +8,42 @@ use indoc::indoc;
 use rusqlite::params_from_iter;
 use rusqlite::{Connection, OptionalExtension, Transaction};
 
+// ISRC helper funciton
+fn get_isrcs_for_track(
+    track_id: i64,
+    conn: &mut Connection,
+) -> Result<Vec<String>, rusqlite::Error> {
+    let mut stmt = conn.prepare("SELECT isrc FROM isrcs WHERE track_id = ?")?;
+    let isrc_iter = stmt.query_map([track_id], |row| row.get(0))?;
+    let mut isrcs = Vec::new();
+    for isrc in isrc_iter {
+        isrcs.push(isrc?);
+    }
+    Ok(isrcs)
+}
+
 pub fn get_track_by_id(track_id: i64, conn: &mut Connection) -> Result<Option<SimpleTrack>> {
     let query = indoc! {"
-    SELECT
-      tracks.id,
-      tracks.name,
-      tracks.album_name,
-      tracks.artist_name,
-      tracks.duration,
-      tracks.last_lyrics_id,
-      tracks.isrcs,
-      lyrics.instrumental,
-      lyrics.plain_lyrics,
-      lyrics.synced_lyrics
-    FROM
-      tracks
-      LEFT JOIN lyrics ON tracks.last_lyrics_id = lyrics.id
-    WHERE
-      tracks.id = ?
+  SELECT
+    tracks.id,
+    tracks.name,
+    tracks.album_name,
+    tracks.artist_name,
+    tracks.duration,
+    tracks.last_lyrics_id,
+    lyrics.instrumental,
+    lyrics.plain_lyrics,
+    lyrics.synced_lyrics
+  FROM
+    tracks
+    LEFT JOIN lyrics ON tracks.last_lyrics_id = lyrics.id
+  WHERE
+    tracks.id = ?
   "};
     let mut statement = conn.prepare(query)?;
     let row = statement
         .query_row([track_id], |row| {
-            let instrumental = match row.get("instrumental")? {
-                Some(value) => value,
-                None => false,
-            };
+            let instrumental = row.get::<_, Option<bool>>("instrumental")?.unwrap_or(false);
 
             let last_lyrics = SimpleLyrics {
                 plain_lyrics: row.get("plain_lyrics")?,
@@ -41,77 +51,95 @@ pub fn get_track_by_id(track_id: i64, conn: &mut Connection) -> Result<Option<Si
                 instrumental,
             };
 
-            let isrcs: Option<String> = row.get("isrcs")?;
-            let isrcs_vec = isrcs
-                .as_ref()
-                .and_then(|s| serde_json::from_str(s).ok());
-
-            Ok(SimpleTrack {
-                id: row.get("id")?,
-                name: row.get("name")?,
-                artist_name: row.get("artist_name")?,
-                album_name: row.get("album_name")?,
-                duration: row.get("duration")?,
-                last_lyrics: Some(last_lyrics),
-                isrcs: isrcs_vec,
-            })
+            Ok((
+                row.get("id")?,
+                row.get("name")?,
+                row.get("artist_name")?,
+                row.get("album_name")?,
+                row.get("duration")?,
+                last_lyrics,
+            ))
         })
         .optional()?;
-    Ok(row)
+
+    drop(statement);
+
+    let result = if let Some((id, name, artist_name, album_name, duration, last_lyrics)) = row {
+        let isrcs = get_isrcs_for_track(id, conn)?;
+        Some(SimpleTrack {
+            id,
+            name,
+            artist_name,
+            album_name,
+            duration,
+            last_lyrics: Some(last_lyrics),
+            isrcs: Some(isrcs),
+        })
+    } else {
+        None
+    };
+    Ok(result)
 }
 
 pub fn get_track_by_isrc(isrc: String, conn: &mut Connection) -> Result<Option<SimpleTrack>> {
     let query = indoc! {"
-    SELECT
-      tracks.id,
-      tracks.name,
-      tracks.album_name,
-      tracks.artist_name,
-      tracks.duration,
-      tracks.last_lyrics_id,
-      tracks.isrcs,
-      lyrics.instrumental,
-      lyrics.plain_lyrics,
-      lyrics.synced_lyrics
-    FROM
-      tracks
-      LEFT JOIN lyrics ON tracks.last_lyrics_id = lyrics.id
-      JOIN json_each(tracks.isrcs) AS je
-    WHERE
-      je.value = ?
-    LIMIT 1
-    "};
+  SELECT
+    tracks.id,
+    tracks.name,
+    tracks.album_name,
+    tracks.artist_name,
+    tracks.duration,
+    tracks.last_lyrics_id,
+    lyrics.instrumental,
+    lyrics.plain_lyrics,
+    lyrics.synced_lyrics
+  FROM
+    isrcs
+    JOIN tracks ON isrcs.track_id = tracks.id
+    LEFT JOIN lyrics ON tracks.last_lyrics_id = lyrics.id
+  WHERE
+    isrcs.isrc = ?
+  LIMIT 1
+  "};
     let mut statement = conn.prepare(query)?;
     let row = statement
         .query_row([isrc], |row| {
-            let instrumental = match row.get("instrumental")? {
-                Some(value) => value,
-                None => false,
-            };
-
+            let instrumental = row.get::<_, Option<bool>>("instrumental")?.unwrap_or(false);
             let last_lyrics = SimpleLyrics {
                 plain_lyrics: row.get("plain_lyrics")?,
                 synced_lyrics: row.get("synced_lyrics")?,
                 instrumental,
             };
-
-            let isrcs: Option<String> = row.get("isrcs")?;
-            let isrcs_vec = isrcs
-                .as_ref()
-                .and_then(|s| serde_json::from_str(s).ok());
-
-            Ok(SimpleTrack {
-                id: row.get("id")?,
-                name: row.get("name")?,
-                artist_name: row.get("artist_name")?,
-                album_name: row.get("album_name")?,
-                duration: row.get("duration")?,
-                last_lyrics: Some(last_lyrics),
-                isrcs: isrcs_vec,
-            })
+            let track_id: i64 = row.get("id")?;
+            Ok((
+                track_id,
+                row.get("name")?,
+                row.get("artist_name")?,
+                row.get("album_name")?,
+                row.get("duration")?,
+                last_lyrics,
+            ))
         })
         .optional()?;
-    Ok(row)
+
+    drop(statement);
+
+    let result = if let Some((track_id, name, artist_name, album_name, duration, last_lyrics)) = row
+    {
+        let isrcs = get_isrcs_for_track(track_id, conn)?;
+        Some(SimpleTrack {
+            id: track_id,
+            name,
+            artist_name,
+            album_name,
+            duration,
+            last_lyrics: Some(last_lyrics),
+            isrcs: Some(isrcs),
+        })
+    } else {
+        None
+    };
+    Ok(result)
 }
 
 pub fn get_track_id_by_metadata(
@@ -268,25 +296,35 @@ pub fn get_track_by_metadata(
                     instrumental,
                 };
 
-                let isrcs: Option<String> = row.get("isrcs")?;
-                let isrcs_vec = isrcs
-                    .as_ref()
-                    .and_then(|s| serde_json::from_str(s).ok());
-
-                Ok(SimpleTrack {
-                    id: row.get("id")?,
-                    name: row.get("name")?,
-                    artist_name: row.get("artist_name")?,
-                    album_name: row.get("album_name")?,
-                    duration: row.get("duration")?,
-                    last_lyrics: Some(last_lyrics),
-                    isrcs: isrcs_vec,
-                })
+                Ok((
+                    row.get("id")?,
+                    row.get("name")?,
+                    row.get("artist_name")?,
+                    row.get("album_name")?,
+                    row.get("duration")?,
+                    last_lyrics,
+                ))
             },
         )
         .optional()?;
+    drop(statement);
 
-    Ok(row)
+    let result = if let Some((track_id, name, artist_name, album_name, duration, last_lyrics)) = row
+    {
+        let isrcs = get_isrcs_for_track(track_id, conn)?;
+        Some(SimpleTrack {
+            id: track_id,
+            name,
+            artist_name,
+            album_name,
+            duration,
+            last_lyrics: Some(last_lyrics),
+            isrcs: Some(isrcs),
+        })
+    } else {
+        None
+    };
+    Ok(result)
 }
 
 pub fn get_tracks_by_keyword(
@@ -327,7 +365,6 @@ pub fn get_tracks_by_keyword(
       tracks.artist_name,
       tracks.album_name,
       tracks.duration,
-      tracks.isrcs,
       lyrics.instrumental,
       lyrics.plain_lyrics,
       lyrics.synced_lyrics
@@ -361,35 +398,41 @@ pub fn get_tracks_by_keyword(
 
     let mut rows = statement.query([fts_query])?;
 
-    let mut tracks = Vec::new();
+    let mut tracks_data = Vec::new();
 
     while let Some(row) = rows.next()? {
-        let instrumental = match row.get("instrumental")? {
-            Some(value) => value,
-            None => false,
-        };
-
+        let instrumental = row.get::<_, Option<bool>>("instrumental")?.unwrap_or(false);
         let last_lyrics = SimpleLyrics {
             plain_lyrics: row.get("plain_lyrics")?,
             synced_lyrics: row.get("synced_lyrics")?,
             instrumental,
         };
+        let track_id: i64 = row.get("id")?;
+        tracks_data.push((
+            track_id,
+            row.get("name")?,
+            row.get("artist_name")?,
+            row.get("album_name")?,
+            row.get("duration")?,
+            last_lyrics,
+        ));
+    }
 
-        let isrcs: Option<String> = row.get("isrcs")?;
-        let isrcs_vec = isrcs
-            .as_ref()
-            .and_then(|s| serde_json::from_str(s).ok());
+    drop(rows);
+    drop(statement);
 
+    let mut tracks = Vec::new();
+    for (track_id, name, artist_name, album_name, duration, last_lyrics) in tracks_data {
+        let isrcs = get_isrcs_for_track(track_id, conn).ok();
         let track = SimpleTrack {
-            id: row.get("id")?,
-            name: row.get("name")?,
-            artist_name: row.get("artist_name")?,
-            album_name: row.get("album_name")?,
-            duration: row.get("duration")?,
+            id: track_id,
+            name,
+            artist_name,
+            album_name,
+            duration,
             last_lyrics: Some(last_lyrics),
-            isrcs: isrcs_vec,
+            isrcs,
         };
-
         tracks.push(track);
     }
 
@@ -418,11 +461,10 @@ pub fn add_one(
       album_name,
       album_name_lower,
       duration,
-      isrcs,
       created_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   "};
     let mut statement = conn.prepare(query)?;
     let row_id = statement.insert((
@@ -433,10 +475,20 @@ pub fn add_one(
         album_name,
         album_name_lower,
         duration,
-        isrcs.as_ref().map(|v| serde_json::to_string(v).unwrap_or("[]".to_string())), // store as JSON
         now,
         now,
     ))?;
+
+    //Add isrcs to separate table
+    if let Some(isrcs) = isrcs {
+        for isrc in isrcs {
+            conn.execute(
+                "INSERT OR IGNORE INTO isrcs (isrc, track_id) VALUES (?, ?)",
+                (&isrc, row_id),
+            )?;
+        }
+    }
+
     Ok(row_id)
 }
 
@@ -462,11 +514,10 @@ pub fn add_one_tx(
       album_name,
       album_name_lower,
       duration,
-      isrcs,
       created_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   "};
     let mut statement = conn.prepare(query)?;
     let row_id = statement.insert((
@@ -477,10 +528,20 @@ pub fn add_one_tx(
         album_name,
         album_name_lower,
         duration,
-        isrcs.as_ref().map(|v| serde_json::to_string(v).unwrap_or("[]".to_string())), // store as JSON
         now,
         now,
     ))?;
+
+    //Add isrcs to separate table
+    if let Some(isrcs) = isrcs {
+        for isrc in isrcs {
+            conn.execute(
+                "INSERT OR IGNORE INTO isrcs (isrc, track_id) VALUES (?, ?)",
+                (&isrc, row_id),
+            )?;
+        }
+    }
+
     Ok(row_id)
 }
 
