@@ -22,6 +22,7 @@ use routes::{
   request_challenge,
   publish_lyrics,
   flag_lyrics,
+  submit_isrcs
 };
 use std::sync::Arc;
 use db::init_db;
@@ -96,8 +97,8 @@ pub async fn serve(port: u16, database: &PathBuf, workers_count: u8) {
     .route("/search", get(search_lyrics::route))
     .route("/request-challenge", post(request_challenge::route))
     .route("/publish", post(publish_lyrics::route))
-    .route("/flag", post(flag_lyrics::route));
-
+    .route("/flag", post(flag_lyrics::route))
+    .route("/submit-isrcs", post(submit_isrcs::route));
   // Metrics
   tokio::spawn(async move {
     tokio::time::sleep(Duration::from_secs(60)).await;

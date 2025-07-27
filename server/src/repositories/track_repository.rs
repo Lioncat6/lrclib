@@ -22,6 +22,22 @@ fn get_isrcs_for_track(
     Ok(isrcs)
 }
 
+pub fn submit_isrcs(
+    isrcs: &[String],
+    track_id: i64,
+    conn: &mut Connection,
+) -> Result<(), rusqlite::Error> {
+    let query = indoc! {"
+    INSERT OR IGNORE INTO isrcs (isrc, track_id)
+    VALUES (?, ?)
+  "};
+    let mut statement = conn.prepare(query)?;
+    for isrc in isrcs {
+        statement.execute((&**isrc, track_id))?;
+    }
+    Ok(())
+}
+
 pub fn get_track_by_id(track_id: i64, conn: &mut Connection) -> Result<Option<SimpleTrack>> {
     let query = indoc! {"
   SELECT

@@ -5,3 +5,4 @@ pub mod search_lyrics;
 pub mod request_challenge;
 pub mod publish_lyrics;
 pub mod flag_lyrics;
+pub mod submit_isrcs;
